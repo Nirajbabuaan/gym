@@ -8,6 +8,37 @@ export function readEnvVar(name: string): string | undefined {
   return raw.trim().replace(/\\n$/g, "").replace(/\n$/g, "");
 }
 
+/**
+ * Vercel's Supabase/Postgres integration injects POSTGRES_* variables. When the
+ * app-specific DATABASE_URL / DIRECT_DATABASE_URL are not set, mirror the
+ * integration values into them so Prisma and env validation keep working.
+ * Explicitly set DATABASE_URL / DIRECT_DATABASE_URL always take precedence.
+ */
+function readFirstEnvVar(names: string[]): string | undefined {
+  for (const name of names) {
+    const value = readEnvVar(name);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function mirrorIntegrationDatabaseEnv(): void {
+  try {
+    if (!readEnvVar("DATABASE_URL")) {
+      const url = readFirstEnvVar(["POSTGRES_PRISMA_URL", "POSTGRES_URL"]);
+      if (url) process.env.DATABASE_URL = url;
+    }
+    if (!readEnvVar("DIRECT_DATABASE_URL")) {
+      const direct = readFirstEnvVar(["POSTGRES_URL_NON_POOLING"]) ?? readEnvVar("DATABASE_URL");
+      if (direct) process.env.DIRECT_DATABASE_URL = direct;
+    }
+  } catch {
+    // process.env may be read-only in some runtimes; fall back to explicit vars.
+  }
+}
+
+mirrorIntegrationDatabaseEnv();
+
 function isPoolerUrl(url: string): boolean {
   return (
     url.includes("pooler.supabase.com") ||
